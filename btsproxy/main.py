@@ -104,7 +104,7 @@ class ESClient:
         min_sequence = last_sequence
         for i in raw_ops:
             if len(i['account_history']['operation_id']) != valid_length:
-                logging.info("Removed invalid op %s from [%d, %d]" % (
+                logging.debug("Removed invalid op %s from [%d, %d]" % (
                     i['account_history']['operation_id'], start, end,
                 ))
                 continue
@@ -145,12 +145,6 @@ class WebSocketHandler(tornado.websocket.WebSocketHandler):
         self.write_message(message)
 
     async def on_message(self, message):
-        if not getattr(self, '_client', None):
-            logging.warning("No client?!")
-            self._client = await tornado.websocket.websocket_connect(
-                os.environ['WS_URL'], on_message_callback=self.on_server_message,
-            )
-
         if (await self.handle_history_message(message)): return
 
         logging.debug("< %s" % message)
