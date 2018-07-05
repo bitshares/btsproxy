@@ -25,7 +25,7 @@ class ESClient:
 
     async def es_search(self, **data):
         url = self.es_url + 'graphene-*/data/_search'
-        logging.info("ES request: %s" % json.dumps(data))
+        logging.debug("ES request: %s" % json.dumps(data))
 
         response = await self.http.fetch(
             url,
@@ -42,35 +42,55 @@ class ESClient:
         return list(map(lambda x: x['_source'], ret['hits']['hits']))
 
     async def get_op_list(self, account, start, end, limit):
-        logging.info("get_op_list(%s, %d, %d, %d)" % (account, start, end, limit))
-
         if end == 0: end = 999999999 # Large enough currently before es plugin update
-        
+
+        ret , _ = await self.traverse_op_digits(
+            account, start, end, limit, 9999999999,
+        )
+        return ret
+
+    async def traverse_op_digits(self, account, start, end, limit, max_sequence):
+        logging.info("traverse_op_digits(%s, %d, %d, %d, %d)" % (
+            account, start, end, limit, max_sequence,
+        ))
+
         ns = len(str(start))          # 12
         ne = len(str(end))            # 9876
 
         assert ns <= ne
         if ns == ne:
-            return await self._real_get_op_list(account, start, end, limit)
+            return await self._real_get_op_list(account, start, end, limit, max_sequence)
 
         right_start = 10 ** (ne - 1)  # 1000
         left_end = right_start - 1    # 999
 
-        ret = await self.get_op_list(account, right_start, end, limit)
+        ret, max_sequence = await self.traverse_op_digits(
+            account, right_start, end, limit, max_sequence,
+        )
         limit -= len(ret)
-        if limit > 0: # We don't have enough in current digit, so recurse.
-            ret += await self.get_op_list(account, start, left_end, limit)
+        if limit > 0 and max_sequence != 1:
+            # We don't have enough in current digit (and the account is not empty yet), so recurse.
+            ret2, max_sequence = await self.traverse_op_digits(
+                account, start, left_end, limit, max_sequence,
+            )
+            ret += ret2
 
-        return ret
+        return ret, max_sequence
     
-    async def _real_get_op_list(self, account, start, end, limit):
-        logging.info("Get %s account history within [%d, %d]" % (account, start, end))
+    async def _real_get_op_list(self, account, start, end, limit, last_sequence):
+        logging.info(
+            "Get %s account history within [%d, %d], last seq: %d" % (
+                account, start, end, last_sequence,
+        ))
 
         id_range = {'gte': '1.11.%d' % start, 'lte': '1.11.%d' % end}
         assert len(id_range['gte']) == len(id_range['lte'])
         query_clause = {
             'must': {'term': {"account_history.account": account}},
-            'filter':{'range': {'account_history.operation_id': id_range}},
+            'filter':{
+                'range': {'account_history.operation_id': id_range},
+                'range': {'account_history.sequence': {'lt': last_sequence}},
+            },
         }
         valid_length = len(id_range['gte'])
 
@@ -81,6 +101,7 @@ class ESClient:
         )
 
         ret = []
+        min_sequence = last_sequence
         for i in raw_ops:
             if len(i['account_history']['operation_id']) != valid_length:
                 logging.info("Removed invalid op %s from [%d, %d]" % (
@@ -97,8 +118,9 @@ class ESClient:
                 'result': i['operation_history']['operation_result'],
                 'virtual_op': i['operation_history']['virtual_op'],
             })
+            min_sequence = i['account_history']['sequence']
 
-        return ret
+        return ret, min_sequence
 
 class RPCHandler(tornado.web.RequestHandler):
     pass
