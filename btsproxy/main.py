@@ -25,6 +25,7 @@ class ESClient:
 
     async def es_search(self, **data):
         url = self.es_url + 'graphene-*/data/_search'
+        logging.info("ES request: %s" % json.dumps(data))
 
         response = await self.http.fetch(
             url,
@@ -42,6 +43,9 @@ class ESClient:
 
     async def get_op_list(self, account, start, end, limit):
         logging.info("get_op_list(%s, %d, %d, %d)" % (account, start, end, limit))
+
+        if end == 0: end = 999999999 # Large enough currently before es plugin update
+        
         ns = len(str(start))          # 12
         ne = len(str(end))            # 9876
 
@@ -49,37 +53,39 @@ class ESClient:
         if ns == ne:
             return await self._real_get_op_list(account, start, end, limit)
 
-        right_start = 10 ** ne        # 1000
+        right_start = 10 ** (ne - 1)  # 1000
         left_end = right_start - 1    # 999
 
         ret = await self.get_op_list(account, right_start, end, limit)
-        limit -= ret
-        if limit > 0:
+        limit -= len(ret)
+        if limit > 0: # We don't have enough in current digit, so recurse.
             ret += await self.get_op_list(account, start, left_end, limit)
 
         return ret
     
     async def _real_get_op_list(self, account, start, end, limit):
-        query_clause = {'must': {'term': {"account_history.account": account}}}
-        valid_length = None
         logging.info("Get %s account history within [%d, %d]" % (account, start, end))
 
-        if not (start == end == 0):
-            id_range = {'gte': '1.11.%d' % start, 'lte': '1.11.%d' % end}
-            assert len(id_range['gte']) == len(id_range['lte'])
-            query_clause['account_history.operation_id'] = {'filter': id_range}
-            valid_length = len(id_range['gte'])
+        id_range = {'gte': '1.11.%d' % start, 'lte': '1.11.%d' % end}
+        assert len(id_range['gte']) == len(id_range['lte'])
+        query_clause = {
+            'must': {'term': {"account_history.account": account}},
+            'filter':{'range': {'account_history.operation_id': id_range}},
+        }
+        valid_length = len(id_range['gte'])
 
         raw_ops = await self.es_search(
             query={'bool': query_clause},
             sort={"account_history.sequence": 'desc'},
-            size=int(limit * 1.12), # Fetch more since we may have some invalid records
+            size=limit,
         )
 
         ret = []
         for i in raw_ops:
-            if (valid_length and
-                len(i['account_history']['operation_id']) != valid_length):
+            if len(i['account_history']['operation_id']) != valid_length:
+                logging.info("Removed invalid op %s from [%d, %d]" % (
+                    i['account_history']['operation_id'], start, end,
+                ))
                 continue
 
             ret.append({
@@ -92,7 +98,7 @@ class ESClient:
                 'virtual_op': i['operation_history']['virtual_op'],
             })
 
-        return ret[-limit:]
+        return ret
 
 class RPCHandler(tornado.web.RequestHandler):
     pass
