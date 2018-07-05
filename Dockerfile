@@ -1,6 +1,8 @@
 FROM python:3.5
 
-COPY . /
+COPY setup.py /
+COPY btsproxy /btsproxy
+WORKDIR /
 
 RUN python setup.py install
 
