@@ -11,18 +11,22 @@ How to use
 A TLS certificate is strongly recommended. Random issues may happen if you use ws:// (we are investigating).
 
 Deploy without docker:
-    git clone https://github.com/Tydus/btsproxy
-    cd btsproxy
-    python3 install
-    export WS_URL=wss://...
-    export ES_URL=https://...
-    export SSL_CERT=/path/to/cert
-    export SSL_KEY=/path/to/key
-    export LISTEN_PORT=8080
-    screen -dm -S btsproxy btsproxy
+```bash
+git clone https://github.com/Tydus/btsproxy
+cd btsproxy
+python3 install
+export WS_URL=wss://...
+export ES_URL=https://...
+export SSL_CERT=/path/to/cert
+export SSL_KEY=/path/to/key
+export LISTEN_PORT=8080
+screen -dm -S btsproxy btsproxy
+```
 
 Deploy with docker:
-    docker run -d -e "..." -v /path/to/cert:/cert tydus/btsproxy
+```bash
+docker run -d -e "..." -v /path/to/cert:/cert tydus/btsproxy
+```
 
 Pitfalls
 ---------------
